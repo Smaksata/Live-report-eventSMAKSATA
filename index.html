@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Report Studio</title>
+<style>
+  :root{
+    --bg:#0a1730; --card:#10264d; --line:#22427a; --txt:#eaf1ff; --mut:#8fa6d0;
+    --acc:#2f7bff; --acc2:#5ec8ff; --ok:#3ddc97; --warn:#ffd166;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+  body{padding:16px 16px 48px;max-width:960px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  h1{font-size:20px;margin:0;letter-spacing:-.2px}
+  h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  h2{font-size:15px;margin:0 0 10px}
+  .tabs{display:flex;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:3px}
+  .tab{border:0;background:transparent;color:var(--mut);padding:8px 16px;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer}
+  .tab[aria-selected="true"]{background:linear-gradient(90deg,var(--acc),var(--acc2));color:#fff}
+  .grid{display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
+  @media(min-width:760px){.grid{grid-template-columns:minmax(0,340px) minmax(0,1fr);align-items:start}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;min-width:0}
+  .stage{display:flex;flex-direction:column;align-items:center;gap:10px}
+  .phone{width:100%;max-width:300px;aspect-ratio:9/16;border-radius:18px;overflow:hidden;background:#000;border:1px solid var(--line);position:relative}
+  .phone canvas,.phone img{width:100%;height:100%;display:block;object-fit:contain}
+  .checker{background-image:linear-gradient(45deg,#1c3568 25%,transparent 25%),linear-gradient(-45deg,#1c3568 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#1c3568 75%),linear-gradient(-45deg,transparent 75%,#1c3568 75%);background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;background-color:#14284f}
+  label.lbl{display:block;font-size:13px;color:var(--mut);margin:12px 0 6px}
+  input[type=text],select{width:100%;background:#081226;color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:11px 12px;font-size:15px}
+  input[type=file]{display:none}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:#1a3566;color:var(--txt);padding:12px 16px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;width:100%}
+  .btn.pri{border:0;background:linear-gradient(90deg,var(--acc),var(--acc2));color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .row .btn{flex:1 1 140px}
+  .note{font-size:13px;color:var(--mut);line-height:1.5;margin:10px 0 0}
+  .note.warn{color:var(--warn)} .note.ok{color:var(--ok)}
+  .banner{border:1px dashed var(--line);border-radius:12px;padding:14px;text-align:center;color:var(--mut);font-size:14px;line-height:1.5}
+  .event{font-size:13px;color:var(--mut);margin:0 0 4px}
+  .event b{color:var(--txt)}
+  ul.items{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+  ul.items li{display:flex;align-items:center;gap:10px;background:#0c1d3d;border:1px solid var(--line);border-radius:12px;padding:8px}
+  .thumb{width:44px;height:78px;border-radius:8px;object-fit:cover;background:#000;flex:none}
+  .meta{flex:1;min-width:0}
+  .meta .n{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta .d{font-size:12px;color:var(--mut)}
+  .ic{border:1px solid var(--line);background:#1a3566;color:var(--txt);width:34px;height:34px;border-radius:9px;font-size:15px;cursor:pointer;flex:none}
+  .bar{height:8px;background:#081226;border-radius:99px;overflow:hidden;margin-top:12px;border:1px solid var(--line)}
+  .bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+  .result video{width:100%;max-width:300px;aspect-ratio:9/16;background:#000;border-radius:14px;display:block;margin:0 auto 12px}
+  .hidden{display:none!important}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Live Report</span> Studio</h1>
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabUser" role="tab" aria-selected="true">Pengguna</button>
+    <button class="tab hidden" id="tabAdmin" role="tab" aria-selected="false">Admin</button>
+  </div>
+</header>
+
+<!-- ============ ADMIN ============ -->
+<section id="viewAdmin" class="grid hidden">
+  <div class="card stage">
+    <p class="event">Bingkai aktif saat ini</p>
+    <div class="phone checker"><img id="adminPreview" alt="Pratinjau bingkai" class="hidden"></div>
+    <p class="note" id="adminDims" style="text-align:center">Belum ada bingkai.</p>
+  </div>
+  <div class="card">
+    <h2>Unggah bingkai live report</h2>
+    <p class="note" style="margin-top:0">Gunakan <b>PNG transparan</b> berukuran <b>1080 × 1920 px</b> (rasio story Instagram). Bagian tengah dibiarkan transparan agar foto/video pengguna terlihat.</p>
+    <label class="lbl" for="eventName">Nama event (opsional)</label>
+    <input type="text" id="eventName" maxlength="80" placeholder="mis. Konser Akustik Malam Minggu">
+    <div style="height:12px"></div>
+    <label class="btn" for="frameFile">Pilih file bingkai (PNG)</label>
+    <input type="file" id="frameFile" accept="image/png,image/webp,image/*">
+    <p class="note" id="pickedInfo"></p>
+
+    <h2 style="margin-top:18px">Akses admin (GitHub)</h2>
+    <label class="lbl" for="ghRepo">Repo (pemilik/nama-repo)</label>
+    <input type="text" id="ghRepo" placeholder="username/live-report" autocapitalize="off" autocomplete="off">
+    <label class="lbl" for="ghToken">Token GitHub (hanya tersimpan di browser ini)</label>
+    <input type="password" id="ghToken" placeholder="github_pat_..." autocomplete="off">
+    <div style="height:12px"></div>
+    <button class="btn pri" id="btnSaveFrame" disabled>Simpan &amp; aktifkan untuk semua pengguna</button>
+    <p class="note" id="adminMsg"></p>
+    <p class="note">Setelah disimpan, GitHub Pages butuh sekitar 1–2 menit sebelum pengguna melihat bingkai baru. Setiap ganti event, unggah bingkai baru di sini.</p>
+  </div>
+</section>
+
+<!-- ============ PENGGUNA ============ -->
+<section id="viewUser" class="grid">
+  <div class="card stage">
+    <p class="event" id="eventLine">Event: <b id="eventTitle">—</b></p>
+    <div class="phone"><canvas id="cv" width="1080" height="1920"></canvas></div>
+    <div class="bar" style="width:100%;max-width:300px"><i id="barI"></i></div>
+    <p class="note" id="timeInfo" style="margin:0">0 detik</p>
+  </div>
+
+  <div>
+    <div class="card" id="noFrame">
+      <div class="banner">Admin belum mengunggah bingkai live report.<br>Coba muat ulang halaman nanti.</div>
+    </div>
+
+    <div class="card" id="editor">
+      <h2>1. Tambahkan kegiatan event</h2>
+      <label class="btn pri" for="mediaFile">+ Tambah foto / video</label>
+      <input type="file" id="mediaFile" accept="image/*,video/*" multiple>
+      <ul class="items" id="list"></ul>
+      <p class="note" id="emptyNote">Belum ada foto atau video. Urutan di daftar = urutan di hasil akhir.</p>
+
+      <h2 style="margin-top:18px">2. Pengaturan</h2>
+      <label class="lbl" for="photoDur">Durasi tiap foto</label>
+      <select id="photoDur">
+        <option value="2">2 detik</option>
+        <option value="3" selected>3 detik</option>
+        <option value="4">4 detik</option>
+        <option value="5">5 detik</option>
+        <option value="7">7 detik</option>
+      </select>
+
+      <h2 style="margin-top:18px">3. Buat video</h2>
+      <div class="two">
+        <button class="btn" id="btnPreview" disabled>▶ Pratinjau</button>
+        <button class="btn pri" id="btnExport" disabled>Buat MP4</button>
+      </div>
+      <button class="btn hidden" id="btnStop" style="margin-top:10px">Hentikan</button>
+      <p class="note warn hidden" id="busyNote">Proses berjalan real-time. Jangan pindah tab atau kunci layar sampai selesai.</p>
+      <p class="note" id="userMsg"></p>
+    </div>
+
+    <div class="card result hidden" id="resultCard" style="margin-top:16px">
+      <h2>Hasil video</h2>
+      <video id="resVideo" controls playsinline></video>
+      <button class="btn pri" id="btnSave">⬇ Unduh video</button>
+      <p class="note" id="resInfo"></p>
+    </div>
+  </div>
+</section>
+
+<div id="hold" style="position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden"></div>
+
+<script>
+(() => {
+  const W = 1080, H = 1920;
+  const $ = id => document.getElementById(id);
+  const cv = $('cv'), ctx = cv.getContext('2d');
+
+  const S = {
+    caps: { db: null, assets: null, downloads: null, user: null },
+    isAdmin: null,         // true / false / null (mode pratinjau tanpa login)
+    frame: null,           // metadata bingkai aktif {url, event, w, h, ...}
+    frameImg: null,
+    items: [],
+    pendingFile: null, pendingDims: null, pendingUrl: null,
+    busy: false, stop: false,
+    audio: null,
+    result: null
+  };
+
+  /* ---------- util ---------- */
+  const fmtT = s => s < 60 ? Math.round(s) + ' detik' : Math.floor(s/60) + ' mnt ' + Math.round(s%60) + ' dtk';
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const nextFrame = () => Promise.race([new Promise(r => requestAnimationFrame(() => r())), sleep(60)]);
+  const slug = s => (s||'event').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'event';
+  const snapData = s => {
+    if (!s) return null;
+    if (typeof s.exists === 'function' && !s.exists()) return null;
+    if (s.exists === false) return null;
+    const d = typeof s.data === 'function' ? s.data() : s;
+    return d && Object.keys(d).length ? d : null;
+  };
+  const loadImg = url => new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i); i.onerror = () => rej(new Error('gagal memuat gambar'));
+    i.src = url;
+  });
+  async function loadFrameImage(url) {
+    let u = url;
+    try { const r = await fetch(url); if (r.ok) u = URL.createObjectURL(await r.blob()); } catch (e) {}
+    return loadImg(u);
+  }
+
+  /* ---------- tab ---------- */
+  function showTab(name) {
+    const admin = name === 'admin';
+    $('viewAdmin').classList.toggle('hidden', !admin);
+    $('viewUser').classList.toggle('hidden', admin);
+    $('tabAdmin').setAttribute('aria-selected', admin);
+    $('tabUser').setAttribute('aria-selected', !admin);
+    if (admin) renderAdmin(); else drawIdle();
+  }
+  $('tabUser').onclick = () => showTab('user');
+  $('tabAdmin').onclick = () => showTab('admin');
+
+  /* ---------- ADMIN ---------- */
+  const LS = {
+    get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  function guessRepo() {
+    const h = location.hostname;
+    if (h.endsWith('.github.io')) { const r = location.pathname.split('/')[1]; if (r) return h.split('.')[0] + '/' + r; }
+    return '';
+  }
+  function renderAdmin() {
+    const img = $('adminPreview');
+    const src = S.pendingUrl || (S.frame && S.frame.url);
+    if (src) { img.src = src; img.classList.remove('hidden'); } else img.classList.add('hidden');
+    if (S.pendingFile) {
+      const d = S.pendingDims;
+      $('adminDims').textContent = 'Pratinjau file baru: ' + d.w + '\u00d7' + d.h + ' px';
+    } else if (S.frame && S.frame.hasFrame) {
+      $('adminDims').textContent = (S.frame.name || 'Bingkai') + (S.frame.w ? ' \u00b7 ' + S.frame.w + '\u00d7' + S.frame.h + ' px' : '');
+    } else $('adminDims').textContent = 'Belum ada bingkai.';
+    if (S.frame && S.frame.event && !$('eventName').value) $('eventName').value = S.frame.event;
+    $('btnSaveFrame').disabled = !(S.pendingFile || (S.frame && S.frame.hasFrame));
+  }
+
+  $('frameFile').onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (S.pendingUrl) URL.revokeObjectURL(S.pendingUrl);
+    S.pendingFile = f; S.pendingUrl = URL.createObjectURL(f);
+    try {
+      const i = await loadImg(S.pendingUrl);
+      S.pendingDims = { w: i.naturalWidth, h: i.naturalHeight };
+      const okRatio = Math.abs(i.naturalWidth / i.naturalHeight - 9 / 16) < 0.01;
+      const info = $('pickedInfo');
+      info.className = 'note ' + (okRatio ? 'ok' : 'warn');
+      info.textContent = f.name + ' \u2014 ' + i.naturalWidth + '\u00d7' + i.naturalHeight + ' px. ' +
+        (okRatio ? 'Rasio 9:16 sesuai.' : 'Rasio bukan 9:16, gambar akan diregangkan ke 1080\u00d71920. Disarankan pakai 1080\u00d71920.');
+    } catch (err) {
+      S.pendingFile = null; S.pendingUrl = null;
+      $('pickedInfo').className = 'note warn';
+      $('pickedInfo').textContent = 'File tidak bisa dibaca sebagai gambar.';
+    }
+    renderAdmin();
+  };
+
+  const fileB64 = f => new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result).split(',')[1]);
+    r.onerror = () => rej(new Error('Gagal membaca file'));
+    r.readAsDataURL(f);
+  });
+  const textB64 = t => btoa(unescape(encodeURIComponent(t)));
+
+  async function putFile(repo, token, path, b64, message) {
+    const url = 'https://api.github.com/repos/' + repo + '/contents/' + path;
+    const h = { Authorization: 'Bearer ' + token, Accept: 'application/vnd.github+json' };
+    let sha;
+    const g = await fetch(url, { headers: h, cache: 'no-store' });
+    if (g.ok) sha = (await g.json()).sha;
+    else if (g.status === 401) throw new Error('Token salah atau sudah kedaluwarsa.');
+    else if (g.status !== 404) throw new Error('GitHub menolak permintaan (' + g.status + ').');
+    const r = await fetch(url, { method: 'PUT', headers: h, body: JSON.stringify({ message, content: b64, sha }) });
+    if (!r.ok) {
+      throw new Error(r.status === 403 || r.status === 404
+        ? 'Token tidak punya izin "Contents: Read and write" untuk repo ini, atau nama repo salah.'
+        : 'Gagal menyimpan (' + r.status + ').');
+    }
+  }
+
+  $('btnSaveFrame').onclick = async () => {
+    const msg = $('adminMsg'), btn = $('btnSaveFrame');
+    const token = $('ghToken').value.trim(), repo = $('ghRepo').value.trim();
+    if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+      msg.className = 'note warn'; msg.textContent = 'Isi nama repo (pemilik/nama-repo) dan token GitHub dulu.'; return;
+    }
+    LS.set('lr_token', token); LS.set('lr_repo', repo);
+    btn.disabled = true; msg.className = 'note'; msg.textContent = 'Menyimpan ke GitHub\u2026';
+    try {
+      const prev = S.frame || {};
+      const meta = {
+        event: $('eventName').value.trim(), updatedAt: Date.now(),
+        hasFrame: !!(S.pendingFile || prev.hasFrame),
+        name: prev.name || '', w: prev.w || 0, h: prev.h || 0
+      };
+      if (S.pendingFile) {
+        await putFile(repo, token, 'frame.png', await fileB64(S.pendingFile), 'Update bingkai live report');
+        meta.name = S.pendingFile.name; meta.w = S.pendingDims.w; meta.h = S.pendingDims.h;
+      }
+      await putFile(repo, token, 'config.json', textB64(JSON.stringify(meta, null, 2)), 'Update info event');
+      msg.className = 'note ok';
+      msg.textContent = 'Tersimpan. Pengguna akan melihat bingkai ini setelah GitHub Pages selesai memperbarui (\u00b11\u20132 menit).';
+      const keep = S.pendingUrl || (prev && prev.url);
+      S.pendingFile = null; S.pendingUrl = null; $('frameFile').value = ''; $('pickedInfo').textContent = '';
+      await applyFrame(Object.assign(meta, { url: keep }));
+    } catch (err) {
+      msg.className = 'note warn';
+      msg.textContent = (err && err.message) ? err.message : 'Gagal menyimpan, coba lagi.';
+    }
+    renderAdmin();
+  };
+
+  /* ---------- bingkai (dipakai admin & pengguna) ---------- */
+  async function applyFrame(meta) {
+    S.frame = meta || null;
+    S.frameImg = null;
+    if (meta && meta.url) {
+      try { S.frameImg = await loadFrameImage(meta.url); } catch (e) { S.frameImg = null; }
+    }
+    $('eventTitle').textContent = (meta && meta.event) ? meta.event : '—';
+    $('eventLine').classList.toggle('hidden', !(meta && meta.event));
+    const has = !!S.frameImg;
+    $('noFrame').classList.toggle('hidden', has);
+    $('editor').classList.toggle('hidden', !has);
+    updateButtons();
+    renderAdmin();
+    if (!S.busy) drawIdle();
+  }
+
+  /* ---------- PENGGUNA: daftar media ---------- */
+  $('mediaFile').onchange = async e => {
+    const files = Array.from(e.target.files);
+    e.target.value = '';
+    $('userMsg').className = 'note'; $('userMsg').textContent = '';
+    for (const f of files) {
+      const url = URL.createObjectURL(f);
+      try {
+        if (f.type.startsWith('video/')) {
+          const v = document.createElement('video');
+          v.preload = 'auto'; v.playsInline = true; v.src = url; v.muted = false;
+          $('hold').appendChild(v);
+          await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(); });
+          S.items.push({ type: 'video', name: f.name, url, el: v, dur: Math.min(v.duration || 5, 30) });
+        } else if (f.type.startsWith('image/')) {
+          const i = await loadImg(url);
+          S.items.push({ type: 'image', name: f.name, url, el: i });
+        }
+      } catch (err) {
+        $('userMsg').className = 'note warn';
+        $('userMsg').textContent = 'File "' + f.name + '" tidak bisa dibaca di browser ini (format tidak didukung).';
+        URL.revokeObjectURL(url);
+      }
+    }
+    renderList();
+  };
+
+  const photoDur = () => parseFloat($('photoDur').value) || 3;
+  const durOf = it => it.type === 'video' ? it.dur : photoDur();
+  const totalDur = () => S.items.reduce((a, it) => a + durOf(it), 0);
+  $('photoDur').onchange = renderList;
+
+  function renderList() {
+    const ul = $('list'); ul.textContent = '';
+    S.items.forEach((it, idx) => {
+      const li = document.createElement('li');
+      let th;
+      if (it.type === 'image') { th = document.createElement('img'); th.src = it.url; }
+      else { th = document.createElement('video'); th.src = it.url + '#t=0.1'; th.muted = true; th.playsInline = true; th.preload = 'metadata'; }
+      th.className = 'thumb';
+      const meta = document.createElement('div'); meta.className = 'meta';
+      const n = document.createElement('div'); n.className = 'n'; n.textContent = (idx + 1) + '. ' + it.name;
+      const d = document.createElement('div'); d.className = 'd';
+      d.textContent = (it.type === 'video' ? 'Video · ' : 'Foto · ') + fmtT(durOf(it)) + (it.type === 'video' && it.el.duration > 30 ? ' (dipotong 30 dtk)' : '');
+      meta.append(n, d);
+      const mk = (txt, fn, dis) => { const b = document.createElement('button'); b.className = 'ic'; b.textContent = txt; b.disabled = !!dis; b.onclick = fn; return b; };
+      li.append(th, meta,
+        mk('↑', () => move(idx, -1), idx === 0),
+        mk('↓', () => move(idx, 1), idx === S.items.length - 1),
+        mk('✕', () => remove(idx)));
+      ul.appendChild(li);
+    });
+    $('emptyNote').classList.toggle('hidden', S.items.length > 0);
+    $('timeInfo').textContent = S.items.length ? 'Total durasi: ' + fmtT(totalDur()) : '0 detik';
+    updateButtons();
+    if (!S.busy) drawIdle();
+  }
+  function move(i, d) { const j = i + d; if (j < 0 || j >= S.items.length) return; [S.items[i], S.items[j]] = [S.items[j], S.items[i]]; renderList(); }
+  function remove(i) {
+    const it = S.items[i];
+    if (it.type === 'video') { try { it.el.pause(); it.el.remove(); } catch (e) {} }
+    URL.revokeObjectURL(it.url);
+    S.items.splice(i, 1); renderList();
+  }
+  function updateButtons() {
+    const can = !!S.frameImg && S.items.length > 0 && !S.busy;
+    $('btnPreview').disabled = !can; $('btnExport').disabled = !can;
+  }
+
+  /* ---------- gambar ke canvas ---------- */
+  function drawCover(src, w, h) {
+    const sc = Math.max(W / w, H / h);
+    const dw = w * sc, dh = h * sc;
+    ctx.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+  function drawScene(it) {
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    if (it) {
+      if (it.type === 'image') drawCover(it.el, it.el.naturalWidth, it.el.naturalHeight);
+      else if (it.el.videoWidth) drawCover(it.el, it.el.videoWidth, it.el.videoHeight);
+    }
+    if (S.frameImg) ctx.drawImage(S.frameImg, 0, 0, W, H);
+  }
+  function drawIdle() {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#12295a'); g.addColorStop(1, '#081226');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (S.items.length) { drawScene(S.items[0]); return; }
+    if (S.frameImg) ctx.drawImage(S.frameImg, 0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '600 52px -apple-system, Segoe UI, Roboto, sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText('Area kegiatan event', W / 2, H / 2);
+  }
+
+  /* ---------- audio (untuk video) ---------- */
+  function ensureAudio() {
+    if (S.audio) return S.audio;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    const ac = new AC();
+    const dest = ac.createMediaStreamDestination();
+    S.audio = { ac, dest };
+    return S.audio;
+  }
+  function wireVideo(it, listen) {
+    const a = ensureAudio(); if (!a) return;
+    if (!it.node) { try { it.node = a.ac.createMediaElementSource(it.el); it.node.connect(a.dest); } catch (e) { return; } }
+    try { it.node.disconnect(a.ac.destination); } catch (e) {}
+    if (listen) { try { it.node.connect(a.ac.destination); } catch (e) {} }
+  }
+
+  /* ---------- pemutar / perekam ---------- */
+  function pickMime() {
+    if (!window.MediaRecorder) return null;
+    const mp4 = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4'];
+    const webm = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+    for (const m of mp4) if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext: 'mp4' };
+    for (const m of webm) if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext: 'webm' };
+    return null;
+  }
+
+  async function run(record) {
+    if (S.busy || !S.items.length) return;
+    S.busy = true; S.stop = false;
+    updateButtons();
+    $('btnStop').classList.remove('hidden');
+    $('busyNote').classList.toggle('hidden', !record);
+    $('resultCard').classList.add('hidden');
+    $('userMsg').className = 'note'; $('userMsg').textContent = record ? 'Merekam video…' : '';
+
+    const total = totalDur();
+    const hasVideo = S.items.some(i => i.type === 'video');
+    let rec = null, chunks = [], fmt = null, stopped = null;
+
+    try {
+      if (record) {
+        fmt = pickMime();
+        if (!fmt) throw new Error('Browser ini tidak mendukung perekaman video. Coba Chrome atau Safari terbaru.');
+        const stream = cv.captureStream(30);
+        if (hasVideo) {
+          const a = ensureAudio();
+          if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
+        }
+        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: 8000000 });
+        rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        stopped = new Promise(r => { rec.onstop = r; });
+        drawScene(S.items[0]);
+        rec.start(500);
+      } else if (hasVideo) {
+        const a = ensureAudio(); if (a) await a.ac.resume();
+      }
+
+      let done = 0;
+      outer:
+      for (const it of S.items) {
+        const dur = durOf(it);
+        if (it.type === 'video') {
+          wireVideo(it, !record);
+          it.el.currentTime = 0;
+          try { await it.el.play(); } catch (e) {}
+        }
+        const t0 = performance.now();
+        while (true) {
+          const e = (performance.now() - t0) / 1000;
+          if (S.stop) { if (it.type === 'video') it.el.pause(); break outer; }
+          if (e >= dur) break;
+          drawScene(it);
+          const p = Math.min(1, (done + e) / total);
+          $('barI').style.width = (p * 100).toFixed(1) + '%';
+          $('timeInfo').textContent = fmtT(done + e) + ' / ' + fmtT(total);
+          await nextFrame();
+        }
+        if (it.type === 'video') { it.el.pause(); wireVideo(it, false); }
+        done += dur;
+      }
+
+      if (record) {
+        if (!S.stop) { drawScene(S.items[S.items.length - 1]); await sleep(400); }
+        if (rec.state !== 'inactive') rec.stop();
+        await stopped;
+        if (!S.stop) {
+          const blob = new Blob(chunks, { type: fmt.mime.split(';')[0] });
+          showResult(blob, fmt);
+          $('userMsg').className = 'note ok';
+          $('userMsg').textContent = 'Video siap.';
+        } else {
+          $('userMsg').textContent = 'Dibatalkan.';
+        }
+      } else {
+        $('userMsg').textContent = S.stop ? '' : 'Pratinjau selesai.';
+      }
+    } catch (err) {
+      try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {}
+      $('userMsg').className = 'note warn';
+      $('userMsg').textContent = (err && err.message) ? err.message : 'Terjadi masalah saat memproses video.';
+    }
+
+    S.busy = false;
+    $('btnStop').classList.add('hidden');
+    $('busyNote').classList.add('hidden');
+    $('barI').style.width = '0%';
+    $('timeInfo').textContent = 'Total durasi: ' + fmtT(totalDur());
+    updateButtons();
+    drawIdle();
+  }
+
+  $('btnPreview').onclick = () => run(false);
+  $('btnExport').onclick = () => run(true);
+  $('btnStop').onclick = () => { S.stop = true; };
+
+  /* ---------- hasil & unduh ---------- */
+  function showResult(blob, fmt) {
+    if (S.result && S.result.url) URL.revokeObjectURL(S.result.url);
+    const url = URL.createObjectURL(blob);
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const filename = 'live-report-' + slug(S.frame && S.frame.event) + '-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.' + fmt.ext;
+    S.result = { blob, url, filename, ext: fmt.ext };
+    $('resVideo').src = url;
+    $('resultCard').classList.remove('hidden');
+    $('btnSave').textContent = '⬇ Unduh ' + fmt.ext.toUpperCase();
+    const mb = (blob.size / 1048576).toFixed(1);
+    $('resInfo').className = 'note' + (fmt.ext === 'mp4' ? '' : ' warn');
+    $('resInfo').textContent = fmt.ext === 'mp4'
+      ? filename + ' · ' + mb + ' MB · 1080×1920'
+      : 'Browser ini hanya bisa menghasilkan WebM (' + mb + ' MB). Untuk file MP4 asli, buka lewat Chrome versi terbaru atau Safari.';
+    $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  $('btnSave').onclick = () => {
+    if (!S.result) return;
+    const a = document.createElement('a');
+    a.href = S.result.url; a.download = S.result.filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    $('resInfo').className = 'note ok';
+    $('resInfo').textContent = 'Jika tidak terunduh, tekan lama pada video lalu pilih Simpan / Download.';
+  };
+
+  /* ---------- start ---------- */
+  async function init() {
+    drawIdle();
+    if (location.hash.indexOf('admin') >= 0) LS.set('lr_admin', '1');
+    if (LS.get('lr_admin') === '1') $('tabAdmin').classList.remove('hidden');
+    $('ghToken').value = LS.get('lr_token') || '';
+    $('ghRepo').value = LS.get('lr_repo') || guessRepo();
+    $('noFrame').classList.remove('hidden'); $('editor').classList.add('hidden');
+    try {
+      const r = await fetch('config.json?t=' + Date.now(), { cache: 'no-store' });
+      if (r.ok) {
+        const m = await r.json();
+        if (m && (m.hasFrame || m.event)) {
+          if (m.hasFrame) m.url = 'frame.png?v=' + (m.updatedAt || 0);
+          await applyFrame(m);
+        }
+      }
+    } catch (e) {}
+    renderAdmin();
+  }
+  init();
+  })();
+</script>
+</body>
+</html>
