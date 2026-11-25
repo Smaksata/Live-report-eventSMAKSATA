@@ -192,8 +192,8 @@
 
       <label class="lbl" for="quality">Kualitas video</label>
       <select id="quality">
-        <option value="fast" selected>Cepat &amp; mulus — 720×1280 (disarankan untuk HP)</option>
-        <option value="hd">HD — 1080×1920 (butuh HP/laptop kuat)</option>
+        <option value="fast" selected>Cepat &amp; mulus — 540×960 (disarankan untuk HP)</option>
+        <option value="hd">HD — 720×1280</option>
       </select>
 
       <h2 style="margin-top:18px">3. Buat video</h2>
@@ -243,7 +243,7 @@
   /* ---------- util ---------- */
   const fmtT = s => s < 60 ? Math.round(s) + ' detik' : Math.floor(s/60) + ' mnt ' + Math.round(s%60) + ' dtk';
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const nextFrame = () => Promise.race([new Promise(r => requestAnimationFrame(() => r())), sleep(60)]);
+  const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
   const slug = s => (s||'event').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40) || 'event';
   const snapData = s => {
     if (!s) return null;
@@ -873,7 +873,8 @@
     $('userMsg').className = 'note'; $('userMsg').textContent = record ? 'Merekam video…' : '';
 
     const hd = $('quality').value === 'hd';
-    if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
+    // Ekspor ringan untuk HP kelas entry-level: 540p default, 720p untuk HD.
+    if (record) { if (hd) setSize(720, 1280); else setSize(540, 960); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
     // Di HP, hindari ekspor WebCodecs frame-per-frame: random seek video
@@ -898,33 +899,19 @@
       if (record) {
         fmt = pickMime();
         if (!fmt) throw new Error('Browser ini tidak mendukung perekaman video. Coba Chrome atau Safari terbaru.');
-        // Android Chrome: minta frame canvas secara eksplisit agar rekaman
-        // tidak berhenti setelah frame awal pada beberapa perangkat.
-        let stream;
-        let canvasTrack = null;
-        try {
-          stream = cv.captureStream(0);
-          canvasTrack = stream.getVideoTracks()[0] || null;
-          if (!canvasTrack || typeof canvasTrack.requestFrame !== 'function') {
-            stream.getTracks().forEach(t => t.stop());
-            stream = cv.captureStream(30);
-            canvasTrack = null;
-          }
-        } catch (e) {
-          stream = cv.captureStream(30);
-          canvasTrack = null;
-        }
-        S.canvasTrack = canvasTrack;
+        // Capture otomatis pada 24 FPS. Manual requestFrame setiap RAF
+        // bisa memaksa puluhan frame/detik dan membuat HP entry-level drop frame.
+        let stream = cv.captureStream(24);
+        S.canvasTrack = null;
         if (hasVideo) {
           const a = ensureAudio();
           if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
         }
-        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 8000000 : 5000000 });
+        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 4000000 : 2200000 });
         rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         stopped = new Promise(r => { rec.onstop = r; });
         drawScene(S.items[0]);
-        if (S.canvasTrack) S.canvasTrack.requestFrame();
-        rec.start();
+        rec.start(1000);
       } else if (hasVideo) {
         const a = ensureAudio(); if (a) await a.ac.resume();
       }
@@ -939,13 +926,13 @@
           try { await it.el.play(); } catch (e) {}
         }
         const t0 = performance.now();
-        let lastUI = 0;
+        let lastUI = 0, lastDraw = -1;
         while (true) {
           const e = (performance.now() - t0) / 1000;
           if (S.stop) { if (it.type === 'video') it.el.pause(); break outer; }
           if (e >= dur) break;
-          drawScene(it);
-          if (record && S.canvasTrack) S.canvasTrack.requestFrame();
+          // Render maksimal 24 FPS; video element tetap berjalan real-time.
+          if (lastDraw < 0 || e - lastDraw >= 1 / 24) { drawScene(it); lastDraw = e; }
           if (e - lastUI > 0.25) {
             lastUI = e;
             const p = Math.min(1, (done + e) / total);
@@ -961,7 +948,6 @@
       if (record) {
         if (!S.stop) {
           drawScene(S.items[S.items.length - 1]);
-          if (S.canvasTrack) S.canvasTrack.requestFrame();
           await sleep(500);
         }
         if (rec.state !== 'inactive') rec.stop();
@@ -1007,7 +993,7 @@
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     const filename = 'live-report-' + slug(S.frame && S.frame.event) + '-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.' + fmt.ext;
-    S.result = { blob, url, filename, ext: fmt.ext, hd: W === 1080 };
+    S.result = { blob, url, filename, ext: fmt.ext, hd: W >= 720 };
     $('resVideo').onloadedmetadata = () => {
       const d = $('resVideo').duration;
       const st = S.stats && fmt.ext === 'mp4' && S.stats.frames ? ' \u00b7 ' + S.stats.chunks + '/' + S.stats.frames + ' frame' : '';
@@ -1019,7 +1005,7 @@
     const mb = (blob.size / 1048576).toFixed(1);
     $('resInfo').className = 'note' + (fmt.ext === 'mp4' ? '' : ' warn');
     $('resInfo').textContent = fmt.ext === 'mp4'
-      ? filename + ' · ' + mb + ' MB · ' + (S.result.hd ? '1080×1920' : '720×1280')
+      ? filename + ' · ' + mb + ' MB · ' + (S.result.hd ? '720×1280' : '540×960')
       : 'Browser ini hanya bisa menghasilkan WebM (' + mb + ' MB). Untuk file MP4 asli, buka lewat Chrome versi terbaru atau Safari.';
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
