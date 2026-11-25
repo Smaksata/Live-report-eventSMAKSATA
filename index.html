@@ -876,7 +876,11 @@
     if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
-    const offline = record && typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && !!window.Mp4Muxer && !legacy;
+    // Di HP, hindari ekspor WebCodecs frame-per-frame: random seek video
+    // sangat lambat pada banyak perangkat Android dan memicu timeout.
+    // Gunakan jalur MediaRecorder real-time di perangkat mobile.
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const offline = record && !isMobile && typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && !!window.Mp4Muxer && !legacy;
     let rec = null, chunks = [], fmt = null, stopped = null;
 
     try {
