@@ -95,7 +95,7 @@
 <section id="viewUser" class="grid">
   <div class="card stage">
     <p class="event" id="eventLine">Event: <b id="eventTitle">—</b></p>
-    <div class="phone"><canvas id="cv" width="1080" height="1920"></canvas></div>
+    <div class="phone"><canvas id="cv" width="720" height="1280"></canvas></div>
     <div class="bar" style="width:100%;max-width:300px"><i id="barI"></i></div>
     <p class="note" id="timeInfo" style="margin:0">0 detik</p>
   </div>
@@ -122,6 +122,12 @@
         <option value="7">7 detik</option>
       </select>
 
+      <label class="lbl" for="quality">Kualitas video</label>
+      <select id="quality">
+        <option value="fast" selected>Cepat &amp; mulus — 720×1280 (disarankan untuk HP)</option>
+        <option value="hd">HD — 1080×1920 (butuh HP/laptop kuat)</option>
+      </select>
+
       <h2 style="margin-top:18px">3. Buat video</h2>
       <div class="two">
         <button class="btn" id="btnPreview" disabled>▶ Pratinjau</button>
@@ -145,7 +151,7 @@
 
 <script>
 (() => {
-  const W = 1080, H = 1920;
+  let W = 720, H = 1280, frameC = null;
   const $ = id => document.getElementById(id);
   const cv = $('cv'), ctx = cv.getContext('2d');
 
@@ -300,9 +306,11 @@
   /* ---------- bingkai (dipakai admin & pengguna) ---------- */
   async function applyFrame(meta) {
     S.frame = meta || null;
-    S.frameImg = null;
+    S.frameImg = null; frameC = null;
+    S.items.forEach(i => { i.cache = null; });
     if (meta && meta.url) {
       try { S.frameImg = await loadFrameImage(meta.url); } catch (e) { S.frameImg = null; }
+      frameC = null;
     }
     $('eventTitle').textContent = (meta && meta.event) ? meta.event : '—';
     $('eventLine').classList.toggle('hidden', !(meta && meta.event));
@@ -384,26 +392,49 @@
   }
 
   /* ---------- gambar ke canvas ---------- */
-  function drawCover(src, w, h) {
+  function setSize(w, h) {
+    W = w; H = h; cv.width = w; cv.height = h; frameC = null;
+    S.items.forEach(i => { i.cache = null; });
+  }
+  function coverDraw(target, src, w, h) {
     const sc = Math.max(W / w, H / h);
     const dw = w * sc, dh = h * sc;
-    ctx.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    target.drawImage(src, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+  // bingkai di-skala sekali saja agar tidak berat di tiap frame
+  function getFrameC() {
+    if (!S.frameImg) return null;
+    if (!frameC) {
+      frameC = document.createElement('canvas'); frameC.width = W; frameC.height = H;
+      frameC.getContext('2d').drawImage(S.frameImg, 0, 0, W, H);
+    }
+    return frameC;
+  }
+  // foto + bingkai digabung sekali saja per foto
+  function getCache(it) {
+    if (!it.cache) {
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const x = c.getContext('2d');
+      x.fillStyle = '#000'; x.fillRect(0, 0, W, H);
+      coverDraw(x, it.el, it.el.naturalWidth, it.el.naturalHeight);
+      const f = getFrameC(); if (f) x.drawImage(f, 0, 0);
+      it.cache = c;
+    }
+    return it.cache;
   }
   function drawScene(it) {
+    if (it && it.type === 'image') { ctx.drawImage(getCache(it), 0, 0); return; }
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-    if (it) {
-      if (it.type === 'image') drawCover(it.el, it.el.naturalWidth, it.el.naturalHeight);
-      else if (it.el.videoWidth) drawCover(it.el, it.el.videoWidth, it.el.videoHeight);
-    }
-    if (S.frameImg) ctx.drawImage(S.frameImg, 0, 0, W, H);
+    if (it && it.el.videoWidth) coverDraw(ctx, it.el, it.el.videoWidth, it.el.videoHeight);
+    const f = getFrameC(); if (f) ctx.drawImage(f, 0, 0);
   }
   function drawIdle() {
     const g = ctx.createLinearGradient(0, 0, 0, H);
     g.addColorStop(0, '#12295a'); g.addColorStop(1, '#081226');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     if (S.items.length) { drawScene(S.items[0]); return; }
-    if (S.frameImg) ctx.drawImage(S.frameImg, 0, 0, W, H);
-    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '600 52px -apple-system, Segoe UI, Roboto, sans-serif';
+    const f = getFrameC(); if (f) ctx.drawImage(f, 0, 0);
+    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.font = '600 ' + Math.round(W / 20) + 'px -apple-system, Segoe UI, Roboto, sans-serif';
     ctx.textAlign = 'center'; ctx.fillText('Area kegiatan event', W / 2, H / 2);
   }
 
@@ -443,6 +474,8 @@
     $('resultCard').classList.add('hidden');
     $('userMsg').className = 'note'; $('userMsg').textContent = record ? 'Merekam video…' : '';
 
+    const hd = $('quality').value === 'hd';
+    if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
     let rec = null, chunks = [], fmt = null, stopped = null;
@@ -456,7 +489,7 @@
           const a = ensureAudio();
           if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
         }
-        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: 8000000 });
+        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 8000000 : 5000000 });
         rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         stopped = new Promise(r => { rec.onstop = r; });
         drawScene(S.items[0]);
@@ -475,14 +508,18 @@
           try { await it.el.play(); } catch (e) {}
         }
         const t0 = performance.now();
+        let lastUI = 0;
         while (true) {
           const e = (performance.now() - t0) / 1000;
           if (S.stop) { if (it.type === 'video') it.el.pause(); break outer; }
           if (e >= dur) break;
           drawScene(it);
-          const p = Math.min(1, (done + e) / total);
-          $('barI').style.width = (p * 100).toFixed(1) + '%';
-          $('timeInfo').textContent = fmtT(done + e) + ' / ' + fmtT(total);
+          if (e - lastUI > 0.25) {
+            lastUI = e;
+            const p = Math.min(1, (done + e) / total);
+            $('barI').style.width = (p * 100).toFixed(1) + '%';
+            $('timeInfo').textContent = fmtT(done + e) + ' / ' + fmtT(total);
+          }
           await nextFrame();
         }
         if (it.type === 'video') { it.el.pause(); wireVideo(it, false); }
@@ -511,6 +548,7 @@
     }
 
     S.busy = false;
+    if (W !== 720) setSize(720, 1280);
     $('btnStop').classList.add('hidden');
     $('busyNote').classList.add('hidden');
     $('barI').style.width = '0%';
@@ -530,14 +568,14 @@
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     const filename = 'live-report-' + slug(S.frame && S.frame.event) + '-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.' + fmt.ext;
-    S.result = { blob, url, filename, ext: fmt.ext };
+    S.result = { blob, url, filename, ext: fmt.ext, hd: W === 1080 };
     $('resVideo').src = url;
     $('resultCard').classList.remove('hidden');
     $('btnSave').textContent = '⬇ Unduh ' + fmt.ext.toUpperCase();
     const mb = (blob.size / 1048576).toFixed(1);
     $('resInfo').className = 'note' + (fmt.ext === 'mp4' ? '' : ' warn');
     $('resInfo').textContent = fmt.ext === 'mp4'
-      ? filename + ' · ' + mb + ' MB · 1080×1920'
+      ? filename + ' · ' + mb + ' MB · ' + (S.result.hd ? '1080×1920' : '720×1280')
       : 'Browser ini hanya bisa menghasilkan WebM (' + mb + ' MB). Untuk file MP4 asli, buka lewat Chrome versi terbaru atau Safari.';
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
