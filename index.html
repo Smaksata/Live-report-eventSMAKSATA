@@ -135,6 +135,7 @@
         <button class="btn pri" id="btnExport" disabled>Buat MP4</button>
       </div>
       <button class="btn hidden" id="btnStop" style="margin-top:10px">Hentikan</button>
+      <button class="btn" id="btnLegacy" style="margin-top:10px;font-size:13px;padding:9px 12px" disabled>Mode alternatif (rekam langsung, ada suara)</button>
       <p class="note warn hidden" id="busyNote">Jangan tutup halaman atau kunci layar sampai selesai.</p>
       <p class="note" id="userMsg"></p>
     </div>
@@ -389,7 +390,7 @@
   }
   function updateButtons() {
     const can = !!S.frameImg && S.items.length > 0 && !S.busy;
-    $('btnPreview').disabled = !can; $('btnExport').disabled = !can;
+    $('btnPreview').disabled = !can; $('btnExport').disabled = !can; $('btnLegacy').disabled = !can;
   }
 
   /* ---------- gambar ke canvas ---------- */
@@ -546,7 +547,8 @@
       $('userMsg').textContent = 'Memproses video frame demi frame\u2026';
     }
     let encErr = null;
-    const enc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { encErr = e; } });
+    let vChunks = 0;
+    const enc = new VideoEncoder({ output: (c, m) => { vChunks++; muxer.addVideoChunk(c, m); }, error: e => { encErr = e; } });
     enc.configure(cfg);
     const totalFrames = Math.max(1, Math.round(total * fps));
     let n = 0;
@@ -558,7 +560,7 @@
         if (encErr) throw new Error('Encoder gagal: ' + (encErr.message || encErr));
         if (it.type === 'video') await seekTo(it.el, Math.max(0, Math.min(i / fps, (it.el.duration || 1) - 0.05)));
         drawScene(it);
-        const f = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / fps) });
+        const f = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / fps), duration: Math.round(1e6 / fps) });
         enc.encode(f, { keyFrame: n % 60 === 0 });
         f.close(); n++;
         while (enc.encodeQueueSize > 6) await sleep(4);
@@ -571,13 +573,15 @@
     }
     await enc.flush();
     try { enc.close(); } catch (e) {}
+    if (encErr) throw new Error('Encoder gagal: ' + (encErr.message || encErr));
     muxer.finalize();
+    S.stats = { frames: n, chunks: vChunks, expect: total };
     return new Blob([muxer.target.buffer], { type: 'video/mp4' });
   }
 
-  async function run(record) {
+  async function run(record, legacy) {
     if (S.busy || !S.items.length) return;
-    S.busy = true; S.stop = false;
+    S.busy = true; S.stop = false; S.stats = null;
     updateButtons();
     $('btnStop').classList.remove('hidden');
     $('busyNote').classList.toggle('hidden', !record);
@@ -588,7 +592,7 @@
     if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
-    const offline = record && typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && !!window.Mp4Muxer;
+    const offline = record && typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && !!window.Mp4Muxer && !legacy;
     let rec = null, chunks = [], fmt = null, stopped = null;
 
     try {
@@ -682,6 +686,7 @@
 
   $('btnPreview').onclick = () => run(false);
   $('btnExport').onclick = () => run(true);
+  $('btnLegacy').onclick = () => run(true, true);
   $('btnStop').onclick = () => { S.stop = true; };
 
   /* ---------- hasil & unduh ---------- */
@@ -692,6 +697,11 @@
     const pad = n => String(n).padStart(2, '0');
     const filename = 'live-report-' + slug(S.frame && S.frame.event) + '-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.' + fmt.ext;
     S.result = { blob, url, filename, ext: fmt.ext, hd: W === 1080 };
+    $('resVideo').onloadedmetadata = () => {
+      const d = $('resVideo').duration;
+      const st = S.stats && fmt.ext === 'mp4' && S.stats.frames ? ' \u00b7 ' + S.stats.chunks + '/' + S.stats.frames + ' frame' : '';
+      $('resInfo').textContent += ' \u00b7 durasi ' + (isFinite(d) ? d.toFixed(1) : '?') + ' dtk' + st;
+    };
     $('resVideo').src = url;
     $('resultCard').classList.remove('hidden');
     $('btnSave').textContent = '⬇ Unduh ' + fmt.ext.toUpperCase();
