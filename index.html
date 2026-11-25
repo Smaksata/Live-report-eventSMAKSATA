@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live Report Studio</title>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
 <style>
   :root{
     --bg:#0a1730; --card:#10264d; --line:#22427a; --txt:#eaf1ff; --mut:#8fa6d0;
@@ -134,7 +135,7 @@
         <button class="btn pri" id="btnExport" disabled>Buat MP4</button>
       </div>
       <button class="btn hidden" id="btnStop" style="margin-top:10px">Hentikan</button>
-      <p class="note warn hidden" id="busyNote">Proses berjalan real-time. Jangan pindah tab atau kunci layar sampai selesai.</p>
+      <p class="note warn hidden" id="busyNote">Jangan tutup halaman atau kunci layar sampai selesai.</p>
       <p class="note" id="userMsg"></p>
     </div>
 
@@ -335,7 +336,7 @@
           v.preload = 'auto'; v.playsInline = true; v.src = url; v.muted = false;
           $('hold').appendChild(v);
           await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(); });
-          S.items.push({ type: 'video', name: f.name, url, el: v, dur: Math.min(v.duration || 5, 30) });
+          S.items.push({ type: 'video', name: f.name, url, el: v, file: f, dur: Math.min(v.duration || 5, 30) });
         } else if (f.type.startsWith('image/')) {
           const i = await loadImg(url);
           S.items.push({ type: 'image', name: f.name, url, el: i });
@@ -465,6 +466,115 @@
     return null;
   }
 
+  const seekTo = (v, t) => new Promise(res => {
+    if (Math.abs(v.currentTime - t) < 0.001) { res(); return; }
+    let to;
+    const done = () => { v.removeEventListener('seeked', done); clearTimeout(to); res(); };
+    to = setTimeout(done, 2000);
+    v.addEventListener('seeked', done);
+    v.currentTime = t;
+  });
+
+  // gabungkan suara semua klip video sesuai urutan & durasinya
+  async function buildAudio(total) {
+    const vids = []; let t = 0;
+    for (const it of S.items) {
+      const d = durOf(it);
+      if (it.type === 'video' && it.file) vids.push({ it, start: t, d });
+      t += d;
+    }
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (!vids.length || !OAC) return null;
+    const SR = 48000;
+    const off = new OAC(2, Math.ceil(total * SR), SR);
+    let any = false;
+    for (const v of vids) {
+      try {
+        const buf = await off.decodeAudioData(await v.it.file.arrayBuffer());
+        const src = off.createBufferSource();
+        src.buffer = buf; src.connect(off.destination);
+        src.start(v.start, 0, Math.min(v.d, buf.duration));
+        any = true;
+      } catch (e) {}
+    }
+    return any ? await off.startRendering() : null;
+  }
+
+  // Ekspor frame demi frame (tidak bergantung kecepatan HP, hasil mulus)
+  async function exportOffline(total, hd) {
+    const fps = 30, w = W, h = H;
+    let cfg = null;
+    for (const c of ['avc1.640028', 'avc1.4D0028', 'avc1.42E028']) {
+      const conf = { codec: c, width: w, height: h, bitrate: hd ? 8000000 : 5000000, framerate: fps };
+      try { const sup = await VideoEncoder.isConfigSupported(conf); if (sup && sup.supported) { cfg = conf; break; } } catch (e) {}
+    }
+    if (!cfg) throw new Error('Perangkat ini tidak mendukung encoder video. Aktifkan opsi "mode lama" atau coba browser lain.');
+    // suara
+    S.audioOk = false;
+    let ab = null, acfg = null, acodec = null;
+    if (typeof AudioEncoder !== 'undefined' && typeof AudioData !== 'undefined' && S.items.some(i => i.type === 'video')) {
+      $('userMsg').textContent = 'Memproses suara\u2026';
+      try { ab = await buildAudio(total); } catch (e) { ab = null; }
+      if (ab) {
+        for (const pair of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) {
+          const conf = { codec: pair[0], sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 };
+          try { const sp = await AudioEncoder.isConfigSupported(conf); if (sp && sp.supported) { acfg = conf; acodec = pair[1]; break; } } catch (e) {}
+        }
+      }
+    }
+    const mopts = { target: new Mp4Muxer.ArrayBufferTarget(), video: { codec: 'avc', width: w, height: h }, fastStart: 'in-memory' };
+    if (acfg) mopts.audio = { codec: acodec, sampleRate: 48000, numberOfChannels: 2 };
+    const muxer = new Mp4Muxer.Muxer(mopts);
+    if (acfg) {
+      let aerr = null;
+      const ae = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => { aerr = e; } });
+      ae.configure(acfg);
+      const N = ab.length, c0 = ab.getChannelData(0), c1 = ab.numberOfChannels > 1 ? ab.getChannelData(1) : c0;
+      const BLK = 4800;
+      for (let i = 0; i < N; i += BLK) {
+        if (aerr) break;
+        const len = Math.min(BLK, N - i);
+        const data = new Float32Array(len * 2);
+        data.set(c0.subarray(i, i + len), 0); data.set(c1.subarray(i, i + len), len);
+        const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: len, numberOfChannels: 2, timestamp: Math.round(i / 48000 * 1e6), data });
+        ae.encode(ad); ad.close();
+        while (ae.encodeQueueSize > 16) await sleep(2);
+      }
+      try { await ae.flush(); } catch (e) {}
+      try { ae.close(); } catch (e) {}
+      S.audioOk = !aerr;
+      $('userMsg').textContent = 'Memproses video frame demi frame\u2026';
+    }
+    let encErr = null;
+    const enc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => { encErr = e; } });
+    enc.configure(cfg);
+    const totalFrames = Math.max(1, Math.round(total * fps));
+    let n = 0;
+    for (const it of S.items) {
+      const cnt = Math.max(1, Math.round(durOf(it) * fps));
+      if (it.type === 'video') { try { it.el.pause(); } catch (e) {} }
+      for (let i = 0; i < cnt; i++) {
+        if (S.stop) { try { enc.close(); } catch (e) {} return null; }
+        if (encErr) throw new Error('Encoder gagal: ' + (encErr.message || encErr));
+        if (it.type === 'video') await seekTo(it.el, Math.max(0, Math.min(i / fps, (it.el.duration || 1) - 0.05)));
+        drawScene(it);
+        const f = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / fps) });
+        enc.encode(f, { keyFrame: n % 60 === 0 });
+        f.close(); n++;
+        while (enc.encodeQueueSize > 6) await sleep(4);
+        if (n % 8 === 0) {
+          $('barI').style.width = Math.min(100, n / totalFrames * 100).toFixed(1) + '%';
+          $('timeInfo').textContent = 'Memproses ' + Math.min(100, Math.round(n / totalFrames * 100)) + '%';
+          await sleep(0);
+        }
+      }
+    }
+    await enc.flush();
+    try { enc.close(); } catch (e) {}
+    muxer.finalize();
+    return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+  }
+
   async function run(record) {
     if (S.busy || !S.items.length) return;
     S.busy = true; S.stop = false;
@@ -478,9 +588,21 @@
     if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
+    const offline = record && typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined' && !!window.Mp4Muxer;
     let rec = null, chunks = [], fmt = null, stopped = null;
 
     try {
+      if (record && offline) {
+        $('userMsg').textContent = 'Memproses video frame demi frame\u2026';
+        const blob = await exportOffline(total, hd);
+        if (blob) {
+          showResult(blob, { ext: 'mp4' });
+          $('userMsg').className = 'note ok';
+          $('userMsg').textContent = (hasVideo && !S.audioOk) ? 'Video siap, tapi suara klip tidak bisa diproses di perangkat ini.' : 'Video siap.';
+        } else {
+          $('userMsg').textContent = 'Dibatalkan.';
+        }
+      } else {
       if (record) {
         fmt = pickMime();
         if (!fmt) throw new Error('Browser ini tidak mendukung perekaman video. Coba Chrome atau Safari terbaru.');
@@ -540,6 +662,7 @@
         }
       } else {
         $('userMsg').textContent = S.stop ? '' : 'Pratinjau selesai.';
+      }
       }
     } catch (err) {
       try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {}
