@@ -863,6 +863,38 @@
     return new Blob([muxer.target.buffer], { type: 'video/mp4' });
   }
 
+  // Pastikan file hasil benar-benar berisi durasi yang diharapkan.
+  // Jangan tampilkan hasil 1 detik sebagai ekspor yang sukses.
+  async function validateExportBlob(blob, expectedDuration) {
+    if (!blob || blob.size < 12000) throw new Error('Hasil ekspor kosong atau terlalu kecil. Coba ekspor ulang.');
+    const url = URL.createObjectURL(blob);
+    try {
+      const meta = await new Promise((resolve, reject) => {
+        const v = document.createElement('video');
+        let timer = setTimeout(() => { v.src = ''; reject(new Error('Browser gagal membaca hasil ekspor. Coba Chrome terbaru.')); }, 15000);
+        v.preload = 'metadata'; v.muted = true; v.playsInline = true;
+        v.onloadedmetadata = () => { clearTimeout(timer); resolve({ duration: v.duration, width: v.videoWidth, height: v.videoHeight }); };
+        v.onerror = () => { clearTimeout(timer); reject(new Error('File hasil ekspor rusak atau formatnya tidak terbaca.')); };
+        v.src = url;
+      });
+      if (!Number.isFinite(meta.duration) || meta.duration < Math.max(1, expectedDuration * 0.75)) {
+        throw new Error('Ekspor belum lengkap: durasi hasil ' + (Number.isFinite(meta.duration) ? meta.duration.toFixed(1) : 'tidak terbaca') + ' detik, seharusnya sekitar ' + expectedDuration.toFixed(1) + ' detik. Jangan gunakan file ini; coba ekspor ulang.');
+      }
+      return meta;
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  async function waitVideoReady(v) {
+    if (v.readyState >= 2 && v.videoWidth > 0) return;
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error('Video belum siap dibaca. Coba gunakan file MP4 H.264.')), 15000);
+      const finish = err => { clearTimeout(timer); v.removeEventListener('loadeddata', onReady); v.removeEventListener('canplay', onReady); v.removeEventListener('error', onError); err ? reject(err) : resolve(); };
+      const onReady = () => { if (v.videoWidth > 0) finish(); };
+      const onError = () => finish(new Error('Format video tidak didukung browser.'));
+      v.addEventListener('loadeddata', onReady); v.addEventListener('canplay', onReady); v.addEventListener('error', onError);
+    });
+  }
+
   async function run(record, legacy) {
     if (S.busy || !S.items.length) return;
     S.busy = true; S.stop = false; S.stats = null;
@@ -889,6 +921,8 @@
         $('userMsg').textContent = 'Memproses video frame demi frame\u2026';
         const blob = await exportOffline(total, hd);
         if (blob) {
+          $('userMsg').textContent = 'Memeriksa durasi dan keutuhan hasil…';
+          await validateExportBlob(blob, total);
           showResult(blob, { ext: 'mp4' });
           $('userMsg').className = 'note ok';
           $('userMsg').textContent = (hasVideo && !S.audioOk) ? 'Video siap, tapi suara klip tidak bisa diproses di perangkat ini.' : 'Video siap.';
@@ -907,7 +941,7 @@
           const a = ensureAudio();
           if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
         }
-        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 4000000 : 2200000 });
+        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 5500000 : 3500000 });
         rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         stopped = new Promise(r => { rec.onstop = r; });
         drawScene(S.items[0]);
@@ -920,18 +954,36 @@
       outer:
       for (const it of S.items) {
         const dur = durOf(it);
+        let videoStart = 0;
         if (it.type === 'video') {
           wireVideo(it, !record);
-          it.el.currentTime = 0;
-          try { await it.el.play(); } catch (e) {}
+          await waitVideoReady(it.el);
+          it.el.pause();
+          try { it.el.currentTime = 0; } catch (e) {}
+          await new Promise(resolve => {
+            if (it.el.currentTime < 0.01 && !it.el.seeking) return resolve();
+            const doneSeek = () => { it.el.removeEventListener('seeked', doneSeek); resolve(); };
+            it.el.addEventListener('seeked', doneSeek, { once: true });
+            setTimeout(resolve, 2500);
+          });
+          it.el.playbackRate = 1;
+          // Jangan lanjut diam-diam kalau browser gagal memulai video.
+          await it.el.play();
+          videoStart = it.el.currentTime;
         }
         const t0 = performance.now();
-        let lastUI = 0, lastDraw = -1;
+        let lastUI = 0, lastDraw = -1, lastProgressAt = performance.now(), lastVideoTime = videoStart;
         while (true) {
-          const e = (performance.now() - t0) / 1000;
+          // Untuk klip video, ikuti waktu pemutaran asli. Kalau decoder tersendat,
+          // ekspor menunggu; tidak memotong durasi dan tidak membuat video 1 detik.
+          const e = it.type === 'video' ? Math.max(0, it.el.currentTime - videoStart) : (performance.now() - t0) / 1000;
           if (S.stop) { if (it.type === 'video') it.el.pause(); break outer; }
-          if (e >= dur) break;
-          // Render maksimal 24 FPS; video element tetap berjalan real-time.
+          if (e >= dur || (it.type === 'video' && it.el.ended)) break;
+          if (it.type === 'video') {
+            if (it.el.currentTime > lastVideoTime + 0.015) { lastVideoTime = it.el.currentTime; lastProgressAt = performance.now(); }
+            if (performance.now() - lastProgressAt > 12000) throw new Error('Pemutaran video macet lebih dari 12 detik. Tutup aplikasi lain, lalu ekspor ulang dengan kualitas Cepat.');
+          }
+          // Render dibatasi 24 FPS agar beban HP lebih ringan.
           if (lastDraw < 0 || e - lastDraw >= 1 / 24) { drawScene(it); lastDraw = e; }
           if (e - lastUI > 0.25) {
             lastUI = e;
@@ -954,9 +1006,12 @@
         await stopped;
         if (!S.stop) {
           const blob = new Blob(chunks, { type: fmt.mime.split(';')[0] });
+          $('userMsg').textContent = 'Memeriksa durasi dan keutuhan hasil…';
+          const meta = await validateExportBlob(blob, total);
+          S.stats = { duration: meta.duration, width: meta.width, height: meta.height };
           showResult(blob, fmt);
           $('userMsg').className = 'note ok';
-          $('userMsg').textContent = 'Video siap.';
+          $('userMsg').textContent = 'Video siap dan durasinya sudah diperiksa.';
         } else {
           $('userMsg').textContent = 'Dibatalkan.';
         }
