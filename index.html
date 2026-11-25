@@ -192,8 +192,8 @@
 
       <label class="lbl" for="quality">Kualitas video</label>
       <select id="quality">
-        <option value="fast" selected>Cepat &amp; mulus — 540×960 (disarankan untuk HP)</option>
-        <option value="hd">HD — 720×1280</option>
+        <option value="fast" selected>Standar — 720×1280 (lebih ringan)</option>
+        <option value="hd">Full HD — 1080×1920</option>
       </select>
 
       <h2 style="margin-top:18px">3. Buat video</h2>
@@ -714,10 +714,17 @@
   /* ---------- pemutar / perekam ---------- */
   function pickMime() {
     if (!window.MediaRecorder) return null;
-    const mp4 = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4'];
-    const webm = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
-    for (const m of mp4) if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext: 'mp4' };
-    for (const m of webm) if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext: 'webm' };
+    // MP4/H.264 only. Never disguise WebM as MP4.
+    const mp4 = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/mp4;codecs=avc1.4D401F,mp4a.40.2',
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4;codecs=avc1',
+      'video/mp4'
+    ];
+    for (const m of mp4) {
+      try { if (MediaRecorder.isTypeSupported(m)) return { mime: m, ext: 'mp4' }; } catch (e) {}
+    }
     return null;
   }
 
@@ -905,8 +912,8 @@
     $('userMsg').className = 'note'; $('userMsg').textContent = record ? 'Merekam video…' : '';
 
     const hd = $('quality').value === 'hd';
-    // Ekspor ringan untuk HP kelas entry-level: 540p default, 720p untuk HD.
-    if (record) { if (hd) setSize(720, 1280); else setSize(540, 960); } else setSize(720, 1280);
+    // Story portrait: standar 720p, Full HD 1080p.
+    if (record) { if (hd) setSize(1080, 1920); else setSize(720, 1280); } else setSize(720, 1280);
     const total = totalDur();
     const hasVideo = S.items.some(i => i.type === 'video');
     // Di HP, hindari ekspor WebCodecs frame-per-frame: random seek video
@@ -932,20 +939,24 @@
       } else {
       if (record) {
         fmt = pickMime();
-        if (!fmt) throw new Error('Browser ini tidak mendukung perekaman video. Coba Chrome atau Safari terbaru.');
-        // Capture otomatis pada 24 FPS. Manual requestFrame setiap RAF
-        // bisa memaksa puluhan frame/detik dan membuat HP entry-level drop frame.
-        let stream = cv.captureStream(24);
+        if (!fmt) throw new Error('Browser/perangkat ini tidak menyediakan encoder MP4 H.264. Tidak dibuat file palsu atau WebM. Coba Chrome terbaru pada perangkat yang mendukung MediaRecorder MP4.');
+        // Capture canvas 30 FPS. Rendering juga dibatasi ke 30 FPS di bawah.
+        let stream = cv.captureStream(30);
         S.canvasTrack = null;
         if (hasVideo) {
           const a = ensureAudio();
           if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
         }
-        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 5500000 : 3500000 });
+        rec = new MediaRecorder(stream, { mimeType: fmt.mime, videoBitsPerSecond: hd ? 14000000 : 8000000 });
         rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
-        stopped = new Promise(r => { rec.onstop = r; });
+        let recorderError = null;
+        rec.onerror = e => { recorderError = e.error || new Error('Perekaman MP4 gagal.'); };
+        stopped = new Promise((resolve, reject) => {
+          rec.onstop = () => recorderError ? reject(recorderError) : resolve();
+        });
         drawScene(S.items[0]);
-        rec.start(1000);
+        // Tanpa timeslice: browser mengeluarkan satu rekaman utuh saat stop.
+        rec.start();
       } else if (hasVideo) {
         const a = ensureAudio(); if (a) await a.ac.resume();
       }
@@ -983,8 +994,8 @@
             if (it.el.currentTime > lastVideoTime + 0.015) { lastVideoTime = it.el.currentTime; lastProgressAt = performance.now(); }
             if (performance.now() - lastProgressAt > 12000) throw new Error('Pemutaran video macet lebih dari 12 detik. Tutup aplikasi lain, lalu ekspor ulang dengan kualitas Cepat.');
           }
-          // Render dibatasi 24 FPS agar beban HP lebih ringan.
-          if (lastDraw < 0 || e - lastDraw >= 1 / 24) { drawScene(it); lastDraw = e; }
+          // Render 30 FPS agar sesuai dengan stream MP4.
+          if (lastDraw < 0 || e - lastDraw >= 1 / 30) { drawScene(it); lastDraw = e; }
           if (e - lastUI > 0.25) {
             lastUI = e;
             const p = Math.min(1, (done + e) / total);
@@ -1005,9 +1016,10 @@
         if (rec.state !== 'inactive') rec.stop();
         await stopped;
         if (!S.stop) {
-          const blob = new Blob(chunks, { type: fmt.mime.split(';')[0] });
+          const blob = new Blob(chunks, { type: 'video/mp4' });
           $('userMsg').textContent = 'Memeriksa durasi dan keutuhan hasil…';
           const meta = await validateExportBlob(blob, total);
+          if (meta.width !== W || meta.height !== H) throw new Error('Resolusi hasil tidak sesuai pilihan. Ekspor dibatalkan agar file yang salah tidak terunduh.');
           S.stats = { duration: meta.duration, width: meta.width, height: meta.height };
           showResult(blob, fmt);
           $('userMsg').className = 'note ok';
@@ -1048,7 +1060,7 @@
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     const filename = 'live-report-' + slug(S.frame && S.frame.event) + '-' + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.' + fmt.ext;
-    S.result = { blob, url, filename, ext: fmt.ext, hd: W >= 720 };
+    S.result = { blob, url, filename, ext: fmt.ext, width: W, height: H, hd: W >= 1080 };
     $('resVideo').onloadedmetadata = () => {
       const d = $('resVideo').duration;
       const st = S.stats && fmt.ext === 'mp4' && S.stats.frames ? ' \u00b7 ' + S.stats.chunks + '/' + S.stats.frames + ' frame' : '';
@@ -1060,8 +1072,8 @@
     const mb = (blob.size / 1048576).toFixed(1);
     $('resInfo').className = 'note' + (fmt.ext === 'mp4' ? '' : ' warn');
     $('resInfo').textContent = fmt.ext === 'mp4'
-      ? filename + ' · ' + mb + ' MB · ' + (S.result.hd ? '720×1280' : '540×960')
-      : 'Browser ini hanya bisa menghasilkan WebM (' + mb + ' MB). Untuk file MP4 asli, buka lewat Chrome versi terbaru atau Safari.';
+      ? filename + ' · ' + mb + ' MB · ' + S.result.width + '×' + S.result.height
+      : 'File bukan MP4 H.264 yang valid. Silakan ekspor ulang di browser yang mendukung MP4.';
     $('resultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
