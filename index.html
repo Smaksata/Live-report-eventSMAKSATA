@@ -721,13 +721,43 @@
     return null;
   }
 
-  const seekTo = (v, t) => new Promise(res => {
-    if (Math.abs(v.currentTime - t) < 0.001) { res(); return; }
-    let to;
-    const done = () => { v.removeEventListener('seeked', done); clearTimeout(to); res(); };
-    to = setTimeout(done, 2000);
-    v.addEventListener('seeked', done);
-    v.currentTime = t;
+  // Tunggu sampai browser benar-benar menampilkan frame tujuan.
+  // Timeout lama 2 detik bisa meloloskan frame sebelum proses seek selesai,
+  // sehingga frame sebelumnya ikut masuk ke hasil ekspor.
+  const seekTo = (v, t) => new Promise((resolve, reject) => {
+    let settled = false, frameId = null, timer = null;
+    const cleanup = () => {
+      v.removeEventListener('seeked', onSeeked);
+      v.removeEventListener('error', onError);
+      if (frameId !== null && typeof v.cancelVideoFrameCallback === 'function') {
+        try { v.cancelVideoFrameCallback(frameId); } catch (e) {}
+      }
+      if (timer) clearTimeout(timer);
+    };
+    const finish = err => {
+      if (settled) return;
+      settled = true; cleanup();
+      err ? reject(err) : resolve();
+    };
+    const waitPresentedFrame = () => {
+      if (typeof v.requestVideoFrameCallback === 'function') {
+        frameId = v.requestVideoFrameCallback(() => finish());
+      } else {
+        requestAnimationFrame(() => requestAnimationFrame(() => finish()));
+      }
+    };
+    const onSeeked = () => waitPresentedFrame();
+    const onError = () => finish(new Error('Gagal membaca frame video.'));
+    v.addEventListener('seeked', onSeeked, { once: true });
+    v.addEventListener('error', onError, { once: true });
+    // Jangan diam-diam lanjut memakai frame lama jika decoding terlalu lama.
+    timer = setTimeout(() => finish(new Error('Pemrosesan frame terlalu lama. Coba ekspor lagi atau gunakan video dengan resolusi lebih rendah.')), 10000);
+    if (Math.abs(v.currentTime - t) < 0.001 && !v.seeking) {
+      waitPresentedFrame();
+      return;
+    }
+    try { v.currentTime = t; }
+    catch (e) { finish(e); }
   });
 
   // gabungkan suara semua klip video sesuai urutan & durasinya
@@ -755,7 +785,7 @@
     return any ? await off.startRendering() : null;
   }
 
-  // Ekspor frame demi frame (tidak bergantung kecepatan HP, hasil mulus)
+  // Ekspor frame demi frame pada 30 FPS; setiap frame video ditunggu sampai selesai ditampilkan.
   async function exportOffline(total, hd) {
     const fps = 30, w = W, h = H;
     let cfg = null;
