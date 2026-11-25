@@ -798,58 +798,113 @@
     enc.configure(cfg);
     const totalFrames = Math.max(1, Math.round(total * fps));
     let n = 0;
-    // Sinkronkan pengambilan frame dengan jam ekspor, bukan menunggu
-    // currentTime video. Di Chrome Android currentTime bisa tertinggal/stall
-    // saat encoder sibuk; menunggunya membuat ekspor timeout dan durasi gagal.
-    // Playback berjalan normal, sementara frame dikirim pada cadence tetap 30 FPS.
-    const frameMs = 1000 / fps;
+    let timelineOffset = 0;
+    let lastTimestamp = -1;
+    const encodeFrame = async (it, timestampUs) => {
+      if (S.stop) return false;
+      if (encErr) throw new Error('Encoder gagal: ' + (encErr.message || encErr));
+      // Pastikan timestamp selalu naik dan berasal dari waktu media aktual.
+      const safeTs = Math.max(lastTimestamp + 1, Math.round(timestampUs));
+      lastTimestamp = safeTs;
+      drawScene(it);
+      const frame = new VideoFrame(cv, { timestamp: safeTs, duration: Math.round(1e6 / fps) });
+      enc.encode(frame, { keyFrame: n % 60 === 0 });
+      frame.close();
+      n++;
+      while (enc.encodeQueueSize > 4) {
+        if (S.stop) return false;
+        await sleep(4);
+      }
+      if (n % 8 === 0) {
+        $('barI').style.width = Math.min(100, n / totalFrames * 100).toFixed(1) + '%';
+        $('timeInfo').textContent = 'Memproses ' + Math.min(100, Math.round(n / totalFrames * 100)) + '%';
+        await sleep(0);
+      }
+      return true;
+    };
+
     for (const it of S.items) {
-      const cnt = Math.max(1, Math.round(durOf(it) * fps));
+      const dur = durOf(it);
       if (it.type === 'video') {
         try { it.el.pause(); it._exportMuted = it.el.muted; it.el.muted = true; } catch (e) {}
-        if (it.el.readyState < 2) await new Promise((resolve, reject) => {
-          const ok = () => { clean(); resolve(); };
-          const bad = () => { clean(); reject(new Error('Video sumber gagal dimuat.')); };
-          const clean = () => { it.el.removeEventListener('loadeddata', ok); it.el.removeEventListener('error', bad); };
-          it.el.addEventListener('loadeddata', ok, { once: true });
-          it.el.addEventListener('error', bad, { once: true });
-          setTimeout(() => { clean(); reject(new Error('Video sumber terlalu lama dimuat.')); }, 15000);
-        });
-        // Pasang listener sebelum mengubah currentTime agar event seeked tidak terlewat.
-        if (it.el.currentTime > 0.05) {
+        if (it.el.readyState < 2) {
           await new Promise((resolve, reject) => {
             const ok = () => { clean(); resolve(); };
-            const bad = () => { clean(); reject(new Error('Gagal mengatur posisi awal video.')); };
-            const clean = () => { it.el.removeEventListener('seeked', ok); it.el.removeEventListener('error', bad); };
-            it.el.addEventListener('seeked', ok, { once: true });
+            const bad = () => { clean(); reject(new Error('Video sumber gagal dimuat.')); };
+            const clean = () => { it.el.removeEventListener('loadeddata', ok); it.el.removeEventListener('error', bad); };
+            it.el.addEventListener('loadeddata', ok, { once: true });
             it.el.addEventListener('error', bad, { once: true });
+            setTimeout(() => { clean(); reject(new Error('Video sumber terlalu lama dimuat.')); }, 15000);
+          });
+        }
+        if (it.el.currentTime > 0.02) {
+          await new Promise(resolve => {
+            const done = () => { it.el.removeEventListener('seeked', done); resolve(); };
+            it.el.addEventListener('seeked', done, { once: true });
             it.el.currentTime = 0;
-            setTimeout(() => { clean(); resolve(); }, 3000);
+            setTimeout(() => { it.el.removeEventListener('seeked', done); resolve(); }, 2500);
           });
         }
         try { await it.el.play(); }
         catch (e) { throw new Error('Browser menolak memutar video saat ekspor. Coba tekan Buat MP4 sekali lagi.'); }
-      }
-      const segmentStart = performance.now();
-      for (let i = 0; i < cnt; i++) {
-        if (S.stop) { try { enc.close(); } catch (e) {} return null; }
-        if (encErr) throw new Error('Encoder gagal: ' + (encErr.message || encErr));
-        // Jangan mengejar frame yang terlewat: jaga urutan timestamp dan durasi.
-        const due = segmentStart + i * frameMs;
-        const delay = due - performance.now();
-        if (delay > 0) await sleep(delay);
-        drawScene(it);
-        const f = new VideoFrame(cv, { timestamp: Math.round(n * 1e6 / fps), duration: Math.round(1e6 / fps) });
-        enc.encode(f, { keyFrame: n % 60 === 0 });
-        f.close(); n++;
-        while (enc.encodeQueueSize > 4) await sleep(4);
-        if (n % 8 === 0) {
-          $('barI').style.width = Math.min(100, n / totalFrames * 100).toFixed(1) + '%';
-          $('timeInfo').textContent = 'Memproses ' + Math.min(100, Math.round(n / totalFrames * 100)) + '%';
-          await sleep(0);
+
+        // Ambil frame saat browser benar-benar menyajikan frame video.
+        // Ini mencegah canvas menggambar frame yang sama berulang atau
+        // melompati frame ketika encoder sedang sibuk.
+        if (typeof it.el.requestVideoFrameCallback === 'function') {
+          await new Promise((resolve, reject) => {
+            let callbackId = null;
+            let done = false;
+            const finish = () => {
+              if (done) return;
+              done = true;
+              if (callbackId !== null && it.el.cancelVideoFrameCallback) it.el.cancelVideoFrameCallback(callbackId);
+              resolve();
+            };
+            const fail = e => { if (done) return; done = true; reject(e); };
+            const onFrame = async (_now, meta) => {
+              if (done) return;
+              if (S.stop || meta.mediaTime >= dur - 0.012) { finish(); return; }
+              try {
+                const ok = await encodeFrame(it, (timelineOffset + meta.mediaTime) * 1e6);
+                if (!ok) { finish(); return; }
+                callbackId = it.el.requestVideoFrameCallback(onFrame);
+              } catch (e) { fail(e); }
+            };
+            callbackId = it.el.requestVideoFrameCallback(onFrame);
+            const watchdog = setTimeout(() => fail(new Error('Frame video tidak diterima browser. Coba ekspor ulang di Chrome terbaru.')), Math.max(20000, (dur + 10) * 1000));
+            const oldFinish = finish;
+            // Pastikan watchdog dibersihkan pada akhir segmen.
+            const check = setInterval(() => {
+              if (done) { clearTimeout(watchdog); clearInterval(check); }
+            }, 100);
+          });
+        } else {
+          // Fallback browser tanpa requestVideoFrameCallback.
+          const segmentStart = performance.now();
+          let i = 0;
+          while (i / fps < dur && !S.stop) {
+            const due = segmentStart + i * 1000 / fps;
+            const delay = due - performance.now();
+            if (delay > 0) await sleep(delay);
+            if (!(await encodeFrame(it, (timelineOffset + i / fps) * 1e6))) break;
+            i++;
+          }
+        }
+        try { it.el.pause(); it.el.muted = !!it._exportMuted; } catch (e) {}
+      } else {
+        // Imágenes y elementos estáticos: cadencia fija a 30 FPS.
+        const cnt = Math.max(1, Math.round(dur * fps));
+        const segmentStart = performance.now();
+        for (let i = 0; i < cnt && !S.stop; i++) {
+          const due = segmentStart + i * 1000 / fps;
+          const delay = due - performance.now();
+          if (delay > 0) await sleep(delay);
+          if (!(await encodeFrame(it, (timelineOffset + i / fps) * 1e6))) break;
         }
       }
-      if (it.type === 'video') { try { it.el.pause(); it.el.muted = !!it._exportMuted; } catch (e) {} }
+      timelineOffset += dur;
+      if (S.stop) break;
     }
     await enc.flush();
     try { enc.close(); } catch (e) {}
