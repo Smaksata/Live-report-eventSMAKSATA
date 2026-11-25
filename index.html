@@ -7,12 +7,46 @@
 <script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
 <style>
   :root{
-    --bg:#0a1730; --card:#10264d; --line:#22427a; --txt:#eaf1ff; --mut:#8fa6d0;
-    --acc:#2f7bff; --acc2:#5ec8ff; --ok:#3ddc97; --warn:#ffd166;
+    --bg:#071225; --card:#101f3d; --line:#263e68; --txt:#edf4ff; --mut:#9aafd0;
+    --acc:#397cff; --acc2:#48c6e8; --ok:#43d9a0; --warn:#ffd166;
+    --surface:#0b1931; --shadow:0 16px 40px rgba(0,0,0,.22);
   }
   *{box-sizing:border-box}
   html,body{margin:0;background:var(--bg);color:var(--txt);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
-  body{padding:16px 16px 48px;max-width:960px;margin:0 auto}
+  body{padding:20px 16px 56px;max-width:1040px;margin:0 auto}
+  button,input,select{font:inherit}
+  button:focus-visible,input:focus-visible,select:focus-visible,label.btn:focus-within{outline:2px solid var(--acc2);outline-offset:3px}
+  header{padding:4px 2px 14px;border-bottom:1px solid rgba(154,175,208,.14)}
+  h1{font-size:22px;font-weight:800}
+  .subtitle{font-size:12px;color:var(--mut);margin-top:5px}
+  .card{box-shadow:var(--shadow)}
+  .btn{transition:transform .15s ease,filter .15s ease,background .15s ease}
+  .btn:active,.ic:active{transform:scale(.98)}
+  .btn:hover:not(:disabled){filter:brightness(1.1)}
+  input[type=text],input[type=password],select{transition:border-color .15s ease,box-shadow .15s ease}
+  input[type=text]:focus,input[type=password]:focus,select:focus{outline:none;border-color:var(--acc2);box-shadow:0 0 0 3px rgba(72,198,232,.12)}
+  .section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px;min-width:0}
+  .stat b{display:block;font-size:18px;color:var(--txt);font-variant-numeric:tabular-nums}
+  .stat span{font-size:11px;color:var(--mut)}
+  .dropzone{border:1px dashed #42639b;border-radius:14px;padding:14px;background:rgba(57,124,255,.06);text-align:center;transition:.15s}
+  .dropzone.dragover{border-color:var(--acc2);background:rgba(72,198,232,.13)}
+  .dropzone .btn{margin-bottom:7px}
+  .small-btn{width:auto;padding:8px 11px;font-size:12px}
+  .empty-state{border:1px dashed var(--line);border-radius:12px;padding:16px;text-align:center;color:var(--mut);font-size:13px;line-height:1.5}
+  .camera-box{margin-top:12px;padding:12px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+  .camera-preview{width:100%;max-height:420px;aspect-ratio:9/16;object-fit:cover;background:#020711;border-radius:11px;display:block}
+  .camera-status{font-size:12px;color:var(--mut);margin:8px 0}
+  .camera-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+  .camera-actions .btn{padding:10px 8px;font-size:13px}
+  .recording-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff5b65;margin-right:6px;animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .item-actions{display:flex;gap:5px}
+  .ic{width:32px;height:32px}
+  .pill{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:99px;background:rgba(67,217,160,.1);color:var(--ok);font-size:11px;font-weight:700}
+  .pill:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  @media(max-width:480px){body{padding:14px 12px 40px}.card{padding:13px}.stats{gap:6px}.stat{padding:8px}.stat b{font-size:16px}.tab{padding:8px 12px}}
   header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
   h1{font-size:20px;margin:0;letter-spacing:-.2px}
   h1 span{background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent}
@@ -56,7 +90,7 @@
 </head>
 <body>
 <header>
-  <h1><span>Live Report</span> Studio</h1>
+  <div><h1><span>Live Report</span> Studio</h1><div class="subtitle">Bikin rangkuman momen event jadi satu video story.</div></div>
   <div class="tabs" role="tablist">
     <button class="tab" id="tabUser" role="tab" aria-selected="true">Pengguna</button>
     <button class="tab hidden" id="tabAdmin" role="tab" aria-selected="false">Admin</button>
@@ -88,6 +122,7 @@
     <div style="height:12px"></div>
     <button class="btn pri" id="btnSaveFrame" disabled>Simpan &amp; aktifkan untuk semua pengguna</button>
     <p class="note" id="adminMsg"></p>
+    <p class="note warn">Keamanan: gunakan fine-grained GitHub token yang hanya diberi akses Contents: Read and write ke repo ini. Token hanya disimpan di sesi tab browser, bukan untuk dibagikan.</p>
     <p class="note">Setelah disimpan, GitHub Pages butuh sekitar 1–2 menit sebelum pengguna melihat bingkai baru. Setiap ganti event, unggah bingkai baru di sini.</p>
   </div>
 </section>
@@ -107,13 +142,45 @@
     </div>
 
     <div class="card" id="editor">
-      <h2>1. Tambahkan kegiatan event</h2>
-      <label class="btn pri" for="mediaFile">+ Tambah foto / video</label>
+      <div class="section-head">
+        <h2>1. Tambahkan kegiatan event</h2>
+        <span class="pill">Editor aktif</span>
+      </div>
+      <div class="stats" aria-live="polite">
+        <div class="stat"><b id="statFiles">0</b><span>Media</span></div>
+        <div class="stat"><b id="statPhotos">0</b><span>Foto</span></div>
+        <div class="stat"><b id="statVideos">0</b><span>Video</span></div>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <label class="btn pri" for="mediaFile">＋ Pilih foto / video</label>
+        <div class="note" style="margin:0">atau tarik file ke area ini</div>
+        <div class="note" style="font-size:11px">Bisa pilih beberapa file sekaligus · Video maksimal 30 detik per klip</div>
+      </div>
       <input type="file" id="mediaFile" accept="image/*,video/*" multiple>
+      <button class="btn" id="btnOpenCamera" type="button" style="margin-top:10px">📷 Buka kamera langsung</button>
+      <div class="camera-box hidden" id="cameraBox">
+        <div class="section-head">
+          <h2 style="margin:0">Live Camera</h2>
+          <button class="btn small-btn" id="btnCloseCamera" type="button">Tutup kamera</button>
+        </div>
+        <video id="cameraPreview" class="camera-preview" autoplay muted playsinline></video>
+        <p class="camera-status" id="cameraStatus" aria-live="polite">Kamera belum aktif.</p>
+        <div class="camera-actions">
+          <button class="btn" id="btnFlipCamera" type="button">⇄ Ganti kamera</button>
+          <button class="btn pri" id="btnTakePhoto" type="button">◎ Ambil foto</button>
+          <button class="btn pri" id="btnStartRec" type="button">● Mulai rekam</button>
+          <button class="btn" id="btnStopRec" type="button" disabled>■ Stop rekam</button>
+        </div>
+        <p class="note" style="margin-bottom:0">Hasil foto dan video otomatis masuk ke daftar media. Maksimal 30 detik video akan digunakan saat ekspor.</p>
+      </div>
+      <div class="section-head" style="margin-top:14px">
+        <span class="note" style="margin:0">Urutan daftar = urutan video</span>
+        <button class="btn small-btn" id="btnClear" type="button" disabled>Kosongkan</button>
+      </div>
       <ul class="items" id="list"></ul>
-      <p class="note" id="emptyNote">Belum ada foto atau video. Urutan di daftar = urutan di hasil akhir.</p>
+      <div class="empty-state" id="emptyNote">Belum ada media. Tambahkan foto atau video untuk mulai menyusun live report.</div>
 
-      <h2 style="margin-top:18px">2. Pengaturan</h2>
+      <h2 style="margin-top:20px">2. Pengaturan video</h2>
       <label class="lbl" for="photoDur">Durasi tiap foto</label>
       <select id="photoDur">
         <option value="2">2 detik</option>
@@ -166,7 +233,11 @@
     pendingFile: null, pendingDims: null, pendingUrl: null,
     busy: false, stop: false,
     audio: null,
-    result: null
+    result: null,
+    cameraStream: null,
+    cameraRecorder: null,
+    cameraChunks: [],
+    cameraFacing: 'environment'
   };
 
   /* ---------- util ---------- */
@@ -199,7 +270,7 @@
     $('viewUser').classList.toggle('hidden', admin);
     $('tabAdmin').setAttribute('aria-selected', admin);
     $('tabUser').setAttribute('aria-selected', !admin);
-    if (admin) renderAdmin(); else drawIdle();
+    if (admin) { stopCamera(); renderAdmin(); } else drawIdle();
   }
   $('tabUser').onclick = () => showTab('user');
   $('tabAdmin').onclick = () => showTab('admin');
@@ -279,7 +350,7 @@
     if (!token || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
       msg.className = 'note warn'; msg.textContent = 'Isi nama repo (pemilik/nama-repo) dan token GitHub dulu.'; return;
     }
-    LS.set('lr_token', token); LS.set('lr_repo', repo);
+    try { sessionStorage.setItem('lr_token', token); } catch (e) {} LS.set('lr_repo', repo);
     btn.disabled = true; msg.className = 'note'; msg.textContent = 'Menyimpan ke GitHub\u2026';
     try {
       const prev = S.frame || {};
@@ -325,11 +396,20 @@
   }
 
   /* ---------- PENGGUNA: daftar media ---------- */
-  $('mediaFile').onchange = async e => {
-    const files = Array.from(e.target.files);
-    e.target.value = '';
+  async function addMediaFiles(files) {
     $('userMsg').className = 'note'; $('userMsg').textContent = '';
+    const remaining = Math.max(0, 60 - S.items.length);
+    if (files.length > remaining) {
+      $('userMsg').className = 'note warn';
+      $('userMsg').textContent = 'Maksimal 60 media per proyek. ' + remaining + ' slot tersisa.';
+      files = files.slice(0, remaining);
+    }
     for (const f of files) {
+      if (f.size > 250 * 1024 * 1024) {
+        $('userMsg').className = 'note warn';
+        $('userMsg').textContent = 'File "' + f.name + '" melebihi batas 250 MB dan dilewati.';
+        continue;
+      }
       const url = URL.createObjectURL(f);
       try {
         if (f.type.startsWith('video/')) {
@@ -349,7 +429,164 @@
       }
     }
     renderList();
+  }
+  $('mediaFile').onchange = async e => {
+    const files = Array.from(e.target.files);
+    e.target.value = '';
+    await addMediaFiles(files);
   };
+
+  /* ---------- LIVE CAMERA: foto & video langsung dari perangkat ---------- */
+  const cameraBox = $('cameraBox');
+  const cameraPreview = $('cameraPreview');
+  function setCameraStatus(message, recording) {
+    $('cameraStatus').innerHTML = recording
+      ? '<span class="recording-dot"></span>' + message
+      : message;
+  }
+  async function startCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraStatus('Browser atau koneksi ini belum mendukung akses kamera. Gunakan Chrome/Safari terbaru melalui HTTPS.');
+      return;
+    }
+    try {
+      if (S.cameraStream) stopCamera();
+      S.cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode: { ideal: S.cameraFacing }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      });
+      cameraPreview.srcObject = S.cameraStream;
+      await cameraPreview.play();
+      cameraBox.classList.remove('hidden');
+      $('btnOpenCamera').classList.add('hidden');
+      $('btnTakePhoto').disabled = false;
+      $('btnStartRec').disabled = false;
+      $('btnFlipCamera').disabled = false;
+      setCameraStatus(S.cameraFacing === 'environment' ? 'Kamera belakang aktif.' : 'Kamera depan aktif.');
+    } catch (err) {
+      const reason = err && err.name === 'NotAllowedError'
+        ? 'Izin kamera/mikrofon ditolak. Izinkan akses dari pengaturan browser.'
+        : err && err.name === 'NotFoundError'
+          ? 'Kamera tidak ditemukan pada perangkat ini.'
+          : 'Kamera tidak bisa dibuka. Pastikan tidak sedang dipakai aplikasi lain.';
+      setCameraStatus(reason);
+      cameraBox.classList.remove('hidden');
+      $('btnOpenCamera').classList.add('hidden');
+    }
+  }
+  function stopCamera() {
+    if (S.cameraRecorder && S.cameraRecorder.state !== 'inactive') {
+      try { S.cameraRecorder.stop(); } catch (e) {}
+    }
+    if (S.cameraStream) {
+      S.cameraStream.getTracks().forEach(track => track.stop());
+      S.cameraStream = null;
+    }
+    cameraPreview.srcObject = null;
+    $('btnStopRec').disabled = true;
+    $('btnStartRec').disabled = false;
+    $('btnTakePhoto').disabled = false;
+  }
+  function closeCamera() {
+    stopCamera();
+    cameraBox.classList.add('hidden');
+    $('btnOpenCamera').classList.remove('hidden');
+    setCameraStatus('Kamera belum aktif.');
+  }
+  $('btnOpenCamera').onclick = () => {
+    cameraBox.classList.remove('hidden');
+    startCamera();
+  };
+  $('btnCloseCamera').onclick = closeCamera;
+  $('btnFlipCamera').onclick = async () => {
+    if (S.cameraRecorder && S.cameraRecorder.state === 'recording') {
+      setCameraStatus('Hentikan rekaman sebelum mengganti kamera.', true);
+      return;
+    }
+    S.cameraFacing = S.cameraFacing === 'environment' ? 'user' : 'environment';
+    await startCamera();
+  };
+  $('btnTakePhoto').onclick = async () => {
+    if (!S.cameraStream || !cameraPreview.videoWidth) return;
+    if (S.items.length >= 60) {
+      setCameraStatus('Batas 60 media per proyek sudah tercapai.');
+      return;
+    }
+    const shot = document.createElement('canvas');
+    shot.width = cameraPreview.videoWidth;
+    shot.height = cameraPreview.videoHeight;
+    shot.getContext('2d').drawImage(cameraPreview, 0, 0, shot.width, shot.height);
+    shot.toBlob(async blob => {
+      if (!blob) { setCameraStatus('Gagal mengambil foto. Coba lagi.'); return; }
+      const file = new File([blob], 'kamera-' + Date.now() + '.jpg', { type: 'image/jpeg' });
+      await addMediaFiles([file]);
+      setCameraStatus('Foto berhasil ditambahkan ke daftar.');
+    }, 'image/jpeg', 0.92);
+  };
+  $('btnStartRec').onclick = () => {
+    if (!S.cameraStream || !window.MediaRecorder) {
+      setCameraStatus('Perekaman langsung tidak didukung browser ini.');
+      return;
+    }
+    if (S.items.length >= 60) {
+      setCameraStatus('Batas 60 media per proyek sudah tercapai.');
+      return;
+    }
+    const candidates = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/mp4'];
+    const mimeType = candidates.find(type => MediaRecorder.isTypeSupported(type));
+    try {
+      S.cameraChunks = [];
+      S.cameraRecorder = new MediaRecorder(S.cameraStream, mimeType ? { mimeType } : undefined);
+      S.cameraRecorder.ondataavailable = e => { if (e.data && e.data.size) S.cameraChunks.push(e.data); };
+      S.cameraRecorder.onerror = () => setCameraStatus('Terjadi kesalahan saat merekam.');
+      S.cameraRecorder.onstop = async () => {
+        const type = S.cameraRecorder.mimeType || mimeType || 'video/webm';
+        const blob = new Blob(S.cameraChunks, { type });
+        S.cameraChunks = [];
+        if (blob.size) {
+          const ext = type.includes('mp4') ? 'mp4' : 'webm';
+          const file = new File([blob], 'rekaman-kamera-' + Date.now() + '.' + ext, { type });
+          await addMediaFiles([file]);
+          setCameraStatus('Rekaman berhasil ditambahkan ke daftar.');
+        } else {
+          setCameraStatus('Rekaman kosong. Coba rekam lagi.');
+        }
+        $('btnStartRec').disabled = false;
+        $('btnStopRec').disabled = true;
+      };
+      S.cameraRecorder.start(500);
+      $('btnStartRec').disabled = true;
+      $('btnStopRec').disabled = false;
+      $('btnTakePhoto').disabled = true;
+      $('btnFlipCamera').disabled = true;
+      setCameraStatus('Sedang merekam… tekan Stop rekam jika selesai.', true);
+    } catch (err) {
+      setCameraStatus('Browser gagal memulai perekaman. Coba browser lain.');
+    }
+  };
+  $('btnStopRec').onclick = () => {
+    if (S.cameraRecorder && S.cameraRecorder.state === 'recording') {
+      S.cameraRecorder.stop();
+      $('btnTakePhoto').disabled = false;
+      $('btnFlipCamera').disabled = false;
+      setCameraStatus('Menyimpan rekaman…');
+    }
+  };
+
+  const dropzone = $('dropzone');
+  if (dropzone) {
+    ['dragenter','dragover'].forEach(type => dropzone.addEventListener(type, e => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.add('dragover');
+    }));
+    ['dragleave','drop'].forEach(type => dropzone.addEventListener(type, e => {
+      e.preventDefault(); e.stopPropagation(); dropzone.classList.remove('dragover');
+    }));
+    dropzone.addEventListener('drop', e => {
+      const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+      if (!files.length) { $('userMsg').className = 'note warn'; $('userMsg').textContent = 'File yang didukung hanya foto dan video.'; return; }
+      addMediaFiles(files);
+    });
+  }
 
   const photoDur = () => parseFloat($('photoDur').value) || 3;
   const durOf = it => it.type === 'video' ? it.dur : photoDur();
@@ -370,18 +607,35 @@
       d.textContent = (it.type === 'video' ? 'Video · ' : 'Foto · ') + fmtT(durOf(it)) + (it.type === 'video' && it.el.duration > 30 ? ' (dipotong 30 dtk)' : '');
       meta.append(n, d);
       const mk = (txt, fn, dis) => { const b = document.createElement('button'); b.className = 'ic'; b.textContent = txt; b.disabled = !!dis; b.onclick = fn; return b; };
-      li.append(th, meta,
-        mk('↑', () => move(idx, -1), idx === 0),
-        mk('↓', () => move(idx, 1), idx === S.items.length - 1),
-        mk('✕', () => remove(idx)));
+      const actions = document.createElement('div'); actions.className = 'item-actions';
+      const up = mk('↑', () => move(idx, -1), idx === 0); up.title = 'Geser ke atas'; up.setAttribute('aria-label','Geser ke atas');
+      const down = mk('↓', () => move(idx, 1), idx === S.items.length - 1); down.title = 'Geser ke bawah'; down.setAttribute('aria-label','Geser ke bawah');
+      const del = mk('×', () => remove(idx)); del.title = 'Hapus media'; del.setAttribute('aria-label','Hapus media');
+      actions.append(up, down, del);
+      li.append(th, meta, actions);
       ul.appendChild(li);
     });
     $('emptyNote').classList.toggle('hidden', S.items.length > 0);
+    $('statFiles').textContent = S.items.length;
+    $('statPhotos').textContent = S.items.filter(i => i.type === 'image').length;
+    $('statVideos').textContent = S.items.filter(i => i.type === 'video').length;
+    $('btnClear').disabled = S.items.length === 0 || S.busy;
     $('timeInfo').textContent = S.items.length ? 'Total durasi: ' + fmtT(totalDur()) : '0 detik';
     updateButtons();
     if (!S.busy) drawIdle();
   }
   function move(i, d) { const j = i + d; if (j < 0 || j >= S.items.length) return; [S.items[i], S.items[j]] = [S.items[j], S.items[i]]; renderList(); }
+  $('btnClear').onclick = () => {
+    if (!S.items.length || S.busy) return;
+    if (!confirm('Hapus semua foto dan video dari daftar?')) return;
+    S.items.forEach(it => {
+      if (it.type === 'video') { try { it.el.pause(); it.el.remove(); } catch (e) {} }
+      try { URL.revokeObjectURL(it.url); } catch (e) {}
+    });
+    S.items = [];
+    renderList();
+    $('userMsg').textContent = 'Daftar media sudah dikosongkan.';
+  };
   function remove(i) {
     const it = S.items[i];
     if (it.type === 'video') { try { it.el.pause(); it.el.remove(); } catch (e) {} }
@@ -727,7 +981,7 @@
     drawIdle();
     if (location.hash.indexOf('admin') >= 0) LS.set('lr_admin', '1');
     if (LS.get('lr_admin') === '1') $('tabAdmin').classList.remove('hidden');
-    $('ghToken').value = LS.get('lr_token') || '';
+    $('ghToken').value = (() => { try { return sessionStorage.getItem('lr_token') || ''; } catch (e) { return ''; } })();
     $('ghRepo').value = LS.get('lr_repo') || guessRepo();
     $('noFrame').classList.remove('hidden'); $('editor').classList.add('hidden');
     try {
