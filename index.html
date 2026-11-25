@@ -898,7 +898,23 @@
       if (record) {
         fmt = pickMime();
         if (!fmt) throw new Error('Browser ini tidak mendukung perekaman video. Coba Chrome atau Safari terbaru.');
-        const stream = cv.captureStream(30);
+        // Android Chrome: minta frame canvas secara eksplisit agar rekaman
+        // tidak berhenti setelah frame awal pada beberapa perangkat.
+        let stream;
+        let canvasTrack = null;
+        try {
+          stream = cv.captureStream(0);
+          canvasTrack = stream.getVideoTracks()[0] || null;
+          if (!canvasTrack || typeof canvasTrack.requestFrame !== 'function') {
+            stream.getTracks().forEach(t => t.stop());
+            stream = cv.captureStream(30);
+            canvasTrack = null;
+          }
+        } catch (e) {
+          stream = cv.captureStream(30);
+          canvasTrack = null;
+        }
+        S.canvasTrack = canvasTrack;
         if (hasVideo) {
           const a = ensureAudio();
           if (a) { await a.ac.resume(); a.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t)); }
@@ -907,7 +923,8 @@
         rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
         stopped = new Promise(r => { rec.onstop = r; });
         drawScene(S.items[0]);
-        rec.start(500);
+        if (S.canvasTrack) S.canvasTrack.requestFrame();
+        rec.start();
       } else if (hasVideo) {
         const a = ensureAudio(); if (a) await a.ac.resume();
       }
@@ -928,6 +945,7 @@
           if (S.stop) { if (it.type === 'video') it.el.pause(); break outer; }
           if (e >= dur) break;
           drawScene(it);
+          if (record && S.canvasTrack) S.canvasTrack.requestFrame();
           if (e - lastUI > 0.25) {
             lastUI = e;
             const p = Math.min(1, (done + e) / total);
@@ -941,7 +959,11 @@
       }
 
       if (record) {
-        if (!S.stop) { drawScene(S.items[S.items.length - 1]); await sleep(400); }
+        if (!S.stop) {
+          drawScene(S.items[S.items.length - 1]);
+          if (S.canvasTrack) S.canvasTrack.requestFrame();
+          await sleep(500);
+        }
         if (rec.state !== 'inactive') rec.stop();
         await stopped;
         if (!S.stop) {
@@ -962,6 +984,7 @@
       $('userMsg').textContent = (err && err.message) ? err.message : 'Terjadi masalah saat memproses video.';
     }
 
+    if (S.canvasTrack) { try { S.canvasTrack.stop(); } catch (e) {} S.canvasTrack = null; }
     S.busy = false;
     if (W !== 720) setSize(720, 1280);
     $('btnStop').classList.add('hidden');
